@@ -6,20 +6,22 @@ released and published.
 Everything under `.template/` is template machinery (build scripts, test
 harnesses, release configs) — you run it, you never edit it.
 
-## 1. Get your copy (with shared git history)
+## 1. Get your copy
 
-Shared git history — not GitHub's "fork" relationship — is what makes template
-updates mergeable later. Two equivalent paths:
+Template updates arrive as monthly file-copy sync PRs (see step 10), which do
+**not** require shared git history — so any of these paths works:
 
-- **GitHub fork** (public providers): fork this repo, rename it to
-  `terraform-provider-<name>` in the repo settings. Do **not** use "Use this
-  template" — that creates disconnected history and breaks template-sync.
-- **Manual fork** (your own second provider, private repos, orgs GitHub won't
-  fork into): create an empty repo, then
+- **"Use this template"** (recommended): create a new repo from this template
+  named `terraform-provider-<name>`. History starts fresh; template-sync
+  still works.
+- **GitHub fork**: fork this repo, rename it to `terraform-provider-<name>`
+  in the repo settings.
+- **Manual clone** (private repos, orgs GitHub won't fork into): create an
+  empty repo, then
   ```
   git clone https://github.com/markdomansky/TEMPLATE-terraform-provider-YOURPROVIDER.git terraform-provider-<name>
   cd terraform-provider-<name>
-  git remote rename origin template
+  git remote remove origin
   git remote add origin <your-new-repo-url>
   git push -u origin main
   ```
@@ -100,9 +102,9 @@ git rm tests/e2e/ExampleFile.Tests.ps1 docs/resources/example_file.md docs/data-
 ```
 
 Also replace the sample `default_directory` attribute in `provider/provider.tfps.json`
-and the sample logic in `provider/scripts/startup.ps1` with your own. (If a
-future template-sync PR touches files you deleted, resolve the modify/delete
-conflict with `git rm` — that's the only conflict class expected.)
+and the sample logic in `provider/scripts/startup.ps1` with your own. Template
+sync only ever touches managed paths, so deleting these fork-owned samples
+never conflicts with future sync PRs.
 
 ## 7. Configure release signing
 
@@ -143,8 +145,24 @@ manifest); future releases appear automatically.
   newest GA engine automatically; pin an exact version in
   `provider/settings.tfps.json` when you need stability (or a specific
   `-beta.N` prerelease).
-- **Template**: a weekly workflow opens a PR when the template's beta/main
-  have new commits (managed files only). Review and merge with a regular
-  merge. To opt out, delete `.github/workflows/template-sync.yml` or disable
-  the workflow in the Actions tab; you can always merge by hand from the
-  `template` remote later.
+- **Template**: `template-sync.yml` checks on the 1st of each month whether
+  the template has managed-file changes this repo lacks. If so, it opens
+  (or refreshes) a **"Template updates available" issue** listing the
+  pending template commits and files — it never changes anything on its
+  own. To apply the updates, run the sync manually (Actions → Template
+  Sync → Run workflow, or `gh workflow run 'Template Sync'`): that copies
+  the managed file set onto a `template-sync` branch and opens a PR into
+  `beta` (or your default branch), closing the tracking issue. An unmerged
+  sync PR is force-pushed and updated by the next manual run, never
+  duplicated. Squash-merge it like any other PR. Two one-time settings:
+  enable "Allow GitHub Actions to create and approve pull requests"
+  (Settings → Actions → General), and optionally add a `TEMPLATE_SYNC_TOKEN`
+  secret (PAT with contents + workflows + pull-requests write) so syncs can
+  update `.github/workflows/**` and trigger CI on the PR — without it,
+  workflow changes are only reported in the PR body. Sync PRs created
+  without the PAT show **no CI checks** (GitHub ignores events from the
+  default token): close and reopen the PR to trigger them — required status
+  checks stay pending until you do. Merging the PR always triggers CI on
+  `beta` normally. To opt out, delete
+  `.github/workflows/template-sync.yml` or disable the workflow in the
+  Actions tab.

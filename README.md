@@ -35,8 +35,8 @@ editors associate the schemas automatically, with no `$schema` key at all.
 
 ## Quickstart
 
-1. Fork this repo (see [SETUP.md](SETUP.md) — including the "fork" flow for
-   repos GitHub won't fork), create a `beta` branch.
+1. Create your repo from this template ("Use this template", or fork — see
+   [SETUP.md](SETUP.md)), create a `beta` branch.
 2. `./.template/build/Initialize-Fork.ps1 -Name yourprovider -Namespace yourgithubname`
 3. Study the working sample in `provider/resources/example_file/`, then
    scaffold your own: `./.template/build/New-Resource.ps1 -Name mailbox`
@@ -68,9 +68,11 @@ carrying a `MANAGED FILE` header.
 | `.releaserc.cjs` | Managed | 3-line discovery shim; the real config is `.template/release/releaserc.cjs`. |
 | `.gitignore`, `LICENSE`, `README.md`, `SETUP.md`, `CLAUDE.md` | Managed | Root-level by convention/tooling. For fork-specific ignores, add a `.gitignore` in a subdirectory. |
 
-Managed files are byte-identical in every fork, which is what makes the weekly
-template-sync PRs merge cleanly. Don't edit them; if one blocks you, open an
-issue on the template instead.
+Managed files are byte-identical in every copy: a monthly check opens an
+issue when the template has updates, and a manually triggered sync workflow
+copies the managed file set over and opens a PR with whatever changed (no
+shared git history needed, so "Use this template" copies sync too). Don't
+edit managed files; if one blocks you, open an issue on the template instead.
 
 ## Engine updates
 
