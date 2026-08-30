@@ -1,0 +1,90 @@
+# MANAGED FILE - do not edit in your fork.
+#
+# Pulls template updates into this fork: fetches the template repo and, when
+# its beta/main branches have commits this fork lacks, opens a PR merging them
+# into the matching branch (real --no-ff merge, so shared history is kept and
+# your own files are untouched). On merge conflicts it opens an issue instead
+# - conflicts should only ever involve sample files you deleted; resolve with
+# `git rm` and merge by hand.
+#
+# TO DISABLE: delete this file, or disable the workflow in the repo's
+# Actions tab (Actions -> Template Sync -> "..." -> Disable workflow). You can
+# always merge manually later:
+#   git remote add template https://github.com/markdomansky/TEMPLATE-terraform-provider-YOURPROVIDER.git
+#   git fetch template && git merge --no-ff template/main
+name: Template Sync
+on:
+  schedule:
+    - cron: '17 6 * * 1' # weekly, Monday 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+env:
+  TEMPLATE_REPO: https://github.com/markdomansky/TEMPLATE-terraform-provider-YOURPROVIDER.git
+
+jobs:
+  sync:
+    name: Sync from template
+    runs-on: ubuntu-latest
+    # Never run inside the template repo itself.
+    if: github.repository != 'markdomansky/TEMPLATE-terraform-provider-YOURPROVIDER'
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: [beta, main]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          fetch-depth: 0
+      - name: Fetch template
+        run: |
+          git remote add template "$TEMPLATE_REPO"
+          git fetch template ${{ matrix.branch }}
+      - name: Open sync PR (or conflict issue)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BRANCH="${{ matrix.branch }}"
+          BEHIND=$(git rev-list --count "HEAD..template/$BRANCH")
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "::notice::$BRANCH is up to date with the template."
+            exit 0
+          fi
+
+          SYNC_BRANCH="template-sync/$BRANCH"
+          if gh pr list --head "$SYNC_BRANCH" --base "$BRANCH" --state open --json number --jq length | grep -qv '^0$'; then
+            echo "::notice::A template-sync PR for $BRANCH is already open."
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$SYNC_BRANCH"
+
+          if git merge --no-ff --no-edit "template/$BRANCH"; then
+            git push -f origin "$SYNC_BRANCH"
+            gh pr create \
+              --base "$BRANCH" \
+              --head "$SYNC_BRANCH" \
+              --title "chore: sync $BEHIND template commit(s) into $BRANCH" \
+              --body "Automated merge of template updates ($BEHIND commit(s) from the template's \`$BRANCH\`). Managed files only should change; review and merge with a REGULAR merge (not squash) to keep the shared history that makes future syncs clean."
+          else
+            git merge --abort
+            gh issue create \
+              --title "Template sync conflict on $BRANCH" \
+              --body "Merging the template's \`$BRANCH\` into this fork's \`$BRANCH\` hit conflicts (usually sample files you deleted - resolve with \`git rm\`). Merge manually:
+
+          \`\`\`
+          git remote add template $TEMPLATE_REPO
+          git fetch template $BRANCH
+          git merge --no-ff template/$BRANCH
+          # resolve, commit, push (via PR)
+          \`\`\`" || true
+            echo "::warning::Merge conflict syncing $BRANCH - opened an issue."
+          fi
