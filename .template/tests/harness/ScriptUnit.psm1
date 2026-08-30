@@ -7,7 +7,12 @@
 # never touch the real target system.
 #
 # Contract enforced (mirrors the engine):
-#   - the script sees $InputData (hashtable) and $Action
+#   - $InputData (hashtable) is bound BY NAME to the script's own param block;
+#     when the script has none, the harness injects param([hashtable]$InputData)
+#     exactly as the engine does
+#   - $InputData is the only parameter the engine ever supplies, so any other
+#     parameter must be optional, and $Action must not be a parameter at all
+#   - $Action is a variable in the enclosing scope
 #   - anything written to the error stream fails the run
 #   - create/update must emit exactly one object; read/delete may emit zero
 #   - create must emit a non-empty 'id'
@@ -41,6 +46,52 @@ function Get-ResourceManifest {
     Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
 }
 
+function Get-ScriptParameter {
+    # Parameters declared by a script's top-level param block, as
+    # [pscustomobject]@{ Name; Mandatory }. Uses the same AST inspection the
+    # engine's RunspaceManager does.
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Script
+    )
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($Script, [ref]$null, [ref]$null)
+    if (-not $ast.ParamBlock) { return @() }
+
+    foreach ($p in $ast.ParamBlock.Parameters) {
+        $mandatory = $false
+        foreach ($attr in $p.Attributes) {
+            if ($attr -isnot [System.Management.Automation.Language.AttributeAst]) { continue }
+            if ($attr.TypeName.GetReflectionAttributeType() -ne [System.Management.Automation.ParameterAttribute]) { continue }
+            foreach ($named in $attr.NamedArguments) {
+                if ($named.ArgumentName -ne 'Mandatory') { continue }
+                # `Mandatory` on its own is shorthand for `Mandatory = $true`.
+                $mandatory = $named.ExpressionOmitted -or
+                    "$($named.Argument.Extent.Text)" -notin '$false', '0'
+            }
+        }
+        [pscustomobject]@{ Name = $p.Name.VariablePath.UserPath; Mandatory = $mandatory }
+    }
+}
+
+function Assert-ScriptParameterContract {
+    # Fails on param blocks the engine cannot satisfy. It binds -InputData and
+    # nothing else, so a second mandatory parameter throws an opaque
+    # ParameterBindingException at apply time, and a declared $Action parameter
+    # silently shadows the enclosing-scope variable with $null.
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [AllowEmptyCollection()][object[]]$Parameters = @()
+    )
+    $file = Split-Path -Leaf $Path
+
+    if ($Parameters.Name -contains 'Action') {
+        throw "$file declares an `$Action parameter; the engine sets `$Action in the enclosing scope and never binds it, so the parameter would always be `$null - remove it and read the variable."
+    }
+    $orphanMandatory = @($Parameters | Where-Object { $_.Mandatory -and $_.Name -ne 'InputData' })
+    if ($orphanMandatory) {
+        throw "$file marks $($orphanMandatory.Name -join ', ') as Mandatory; the engine only binds -InputData, so nothing can supply them. Give them defaults instead."
+    }
+}
+
 function Invoke-ResourceScript {
     # Run one CRUD script with a fake $InputData and return the emitted object
     # (a hashtable/PSObject), enforcing the engine contract. Set up globals
@@ -66,15 +117,18 @@ function Invoke-ResourceScript {
     }
 
     try {
-        # Mirror the engine: it injects param($InputData) itself, so scripts
-        # must not declare their own param block.
-        if ($content -match '(?m)^\s*param\s*\(') {
-            throw "$scriptPath declares a param(...) block; the engine injects `$InputData itself - remove it."
-        }
-        $sb = [scriptblock]::Create("param(`$InputData, `$Action)`n$content")
+        # Mirror the engine's BuildScript: bind -InputData by name to the
+        # script's own param block, or inject one when it has none.
+        $declared = Get-ScriptParameter -Script $content
+        Assert-ScriptParameterContract -Path $scriptPath -Parameters $declared
 
+        $prelude = if ($declared.Name -contains 'InputData') { '' } else { "param([hashtable]`$InputData)`n" }
+        $sb = [scriptblock]::Create($prelude + $content)
+
+        # $Action reaches the script as an enclosing-scope variable (the engine
+        # assigns it outside the script's own scope), never as a parameter.
         $errors = @()
-        $emitted = @(& $sb $InputData $Action 2>&1 | ForEach-Object {
+        $emitted = @(& $sb -InputData $InputData 2>&1 | ForEach-Object {
                 if ($_ -is [System.Management.Automation.ErrorRecord]) { $errors += $_ } else { $_ }
             })
 
@@ -105,4 +159,4 @@ function Invoke-ResourceScript {
     }
 }
 
-Export-ModuleMember -Function Invoke-ResourceScript, Get-ResourceScriptPath, Get-ResourceManifest
+Export-ModuleMember -Function Invoke-ResourceScript, Get-ResourceScriptPath, Get-ResourceManifest, Get-ScriptParameter

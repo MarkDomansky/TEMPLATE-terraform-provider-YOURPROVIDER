@@ -79,27 +79,64 @@ else {
 Set-Content -LiteralPath (Join-Path $dir $manifestName) -Value $schema
 
 $contract = @'
-# Contract: $InputData holds the non-null config attributes (plus 'id' on
-# read/update/delete). Emit EXACTLY ONE object; error-stream output fails the
-# operation; pipe unwanted cmdlet output to Out-Null.
+# Contract: the engine binds $InputData BY NAME and supplies no other argument,
+# so any extra parameter you declare must be optional. $Action ('create',
+# 'read', ...) arrives as an enclosing-scope variable - declaring it as a
+# parameter shadows it with $null. Emit EXACTLY ONE object; error-stream output
+# fails the operation; pipe unwanted cmdlet output to Out-Null.
+#
+# Validate in the param block only what the manifest cannot already guarantee:
+# required attributes, types and `one_of` validators are enforced by Terraform
+# before the script runs.
 '@
+
+# param block for scripts that receive config attributes only.
+$paramConfigOnly = @'
+[CmdletBinding()]
+param(
+    # Every non-null config attribute from the manifest, naturally typed
+    # (numbers, bools, arrays, hashtables; `json` attributes arrive decoded),
+    # plus any `default` it declares.
+    [Parameter(Mandatory)]
+    [ValidateNotNull()]
+    [hashtable]$InputData
+)
+'@
+
+# param block for read/update/delete, which additionally get the engine-injected
+# 'id'. __SCRIPT__ is replaced with the file name so the failure names itself.
+$paramWithIdTemplate = @'
+[CmdletBinding()]
+param(
+    # The config attributes from state, plus 'id' - the value create.ps1
+    # emitted, or the argument to `terraform import`.
+    [Parameter(Mandatory)]
+    [ValidateNotNull()]
+    [ValidateScript({ -not [string]::IsNullOrWhiteSpace([string]$_['id']) },
+        ErrorMessage = '__SCRIPT__ requires a non-empty $InputData.id; the engine injects it from state.')]
+    [hashtable]$InputData
+)
+'@
+function New-IdParamBlock([string]$ScriptName) { $paramWithIdTemplate.Replace('__SCRIPT__', $ScriptName) }
 
 if ($DataSource) {
     Set-Content -LiteralPath (Join-Path $dir 'read.ps1') -Value @"
-# read.ps1 - the only script a data source has.
+# read.ps1 - the only script a data source has. A data source carries no state,
+# so there is no 'id' in `$InputData.
 $contract
-
+$paramConfigOnly
 # TODO: look the object up and emit its computed attributes.
 @{
-    example_output = "TODO: value for `$($InputData.name)"
+    example_output = "TODO: value for `$(`$InputData.name)"
 }
 "@
 }
 else {
     Set-Content -LiteralPath (Join-Path $dir 'create.ps1') -Value @"
-# create.ps1 - must emit a non-empty unique 'id'.
+# create.ps1 - must emit a non-empty unique 'id'. No 'id' in `$InputData yet:
+# create is what mints it.
 $contract
-
+$paramConfigOnly
 # TODO: create the object.
 @{
     id             = `$InputData.name
@@ -109,7 +146,7 @@ $contract
     Set-Content -LiteralPath (Join-Path $dir 'read.ps1') -Value @"
 # read.ps1 - emit NOTHING if the object is gone (Terraform plans recreation).
 $contract
-
+$(New-IdParamBlock 'read.ps1')
 # TODO: look the object up by `$InputData.id.
 # if (-not `$found) { return }
 @{
@@ -121,7 +158,7 @@ $contract
 # update.ps1 - DELETE THIS FILE if every config change should replace the
 # object instead; its presence alone enables in-place updates.
 $contract
-
+$(New-IdParamBlock 'update.ps1')
 # TODO: apply the planned config in `$InputData to the object `$InputData.id.
 @{
     id             = `$InputData.id
@@ -132,7 +169,7 @@ $contract
 # delete.ps1 - keep destroy idempotent: deleting an already-missing object
 # should succeed.
 $contract
-
+$(New-IdParamBlock 'delete.ps1')
 # TODO: delete the object `$InputData.id.
 @{ id = `$InputData.id }
 "@
