@@ -15,9 +15,17 @@ name: Release
 # Merge beta into main with a real merge commit, never a squash - the analyzer
 # needs the individual conventional commits to pick the GA bump.
 # Only `main` ever syncs the wiki - see wiki-sync.yml.
+#
+# IN THE TEMPLATE REPO ITSELF this pipeline builds and smoke-tests but never
+# publishes - see the guard on the `publish` job. The template ships no
+# installable provider (its name is the `yourprovider` placeholder) and forks
+# consume it as a file copy from a ref, not as a versioned artifact.
 on:
   push:
     branches:
+      # Both lines ship to forks. The template repo has no `beta` branch of its
+      # own - managed-file changes land as PRs into `main`, which is the ref
+      # template-sync.yml copies from - so that entry is inert there.
       - main
       - beta
     # Docs, examples and the test suites do not ship in the provider binary,
@@ -243,6 +251,14 @@ jobs:
   publish:
     name: Tag and Publish Release
     needs: [version, smoke]
+    # Never publish from the template repo itself - same self-exclusion as
+    # template-sync.yml. The jobs above still run there (dogfooding: a broken
+    # release pipeline fails on the template, not in every fork), but tagging
+    # would stamp v* tags and upload `terraform-provider-yourprovider` zips -
+    # the placeholder name from provider/settings.tfps.json - onto the
+    # template's releases page, which is the first thing anyone evaluating the
+    # template looks at. In your fork this condition is true and publish runs.
+    if: github.repository != 'MarkDomansky/TEMPLATE-terraform-provider-YOURPROVIDER'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

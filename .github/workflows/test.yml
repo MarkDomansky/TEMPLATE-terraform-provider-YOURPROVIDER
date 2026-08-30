@@ -14,8 +14,12 @@ on:
       - '.github/workflows/wiki-sync.yml'
       - '.template/scripts/Sync-DocsToWiki.ps1'
   pull_request:
-    # `beta` is the day-to-day target: work lands as squash-merged PRs into it.
-    # `main` only ever receives the beta -> main GA merge.
+    # In a fork, `beta` is the day-to-day target: work lands as squash-merged
+    # PRs into it, and `main` only ever receives the beta -> main GA merge.
+    # The template repo has no `beta` of its own - it publishes nothing, so
+    # there is no prerelease channel to stage; its PRs target `main` directly,
+    # since `main` is the ref forks sync from. Keep `beta` listed either way:
+    # this file is copied verbatim into forks, where it is the release line.
     branches: [main, beta]
     # Keep in sync with the push filter above (Actions has no YAML anchors).
     paths-ignore:
