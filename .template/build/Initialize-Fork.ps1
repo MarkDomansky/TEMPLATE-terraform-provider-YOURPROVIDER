@@ -47,5 +47,6 @@ Write-Host '  2. Fill in resource.tfps.json + scripts; study provider/resources/
 Write-Host '  3. pwsh ./.template/tests/unit/Invoke-UnitTests.ps1      # fast unit tests'
 Write-Host '  4. ./.template/build/Build-Provider.ps1 then Invoke-Pester ./tests/e2e  # real terraform'
 Write-Host '  5. Delete the example_file sample folders (resources, data-sources, tests, docs)'
+Write-Host '     and REPO-NOTES.md (the template repo''s own notes; write your own or drop it)'
 Write-Host '  6. Set GPG_PRIVATE_KEY / GPG_PASSPHRASE repo secrets; create the first wiki page'
 Write-Host '  7. Merge PRs to beta (squash) for prereleases; merge beta->main (real merge) for GA'

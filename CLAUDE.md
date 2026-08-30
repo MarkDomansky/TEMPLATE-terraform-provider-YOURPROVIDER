@@ -30,14 +30,13 @@ workflow creates the tag itself, only after the install smoke test passes.
   REAL merge commit (never squash) for GA.
 * Only `main` ever publishes the wiki (`wiki-sync.yml` asserts this in the
   job's `if:` as well as its trigger — do not relax either).
-* **Exception, in the template repo itself:** there is no `beta` branch and no
-  release. The template ships no installable provider, and forks consume it as
-  a file copy from a ref (`template-sync.yml` checks out `main`), never as a
-  versioned artifact — so a prerelease channel would have no consumer. Work
-  lands as PRs into `main`; the `publish` job in `release.yml` is guarded off
-  by repository name, so the pipeline still builds and smoke-tests here but
-  never tags or uploads `terraform-provider-yourprovider` artifacts. The rules
-  above are what forks inherit and are correct there.
+
+## Repo-local notes
+
+If `REPO-NOTES.md` exists at the repo root, read it too. This file is a
+MANAGED file replaced wholesale by every template sync, so anything specific
+to one repository — local exceptions to the rules above, house conventions,
+environment quirks — belongs in `REPO-NOTES.md`, which the sync never touches.
 
 ## Engine dependency
 
