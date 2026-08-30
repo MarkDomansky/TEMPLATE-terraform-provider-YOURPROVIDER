@@ -3,6 +3,7 @@
 # Discovers and runs every script-level unit test:
 #   provider/resources/*/tests/*.Tests.ps1
 #   provider/data-sources/*/tests/*.Tests.ps1
+#   provider/scripts/tests/*.Tests.ps1        (lifecycle scripts)
 #
 # Usage:  pwsh ./.template/tests/unit/Invoke-UnitTests.ps1 [-CI]
 #Requires -Version 7
@@ -20,6 +21,8 @@ $testDirs = @(
         -Directory -ErrorAction SilentlyContinue |
         ForEach-Object { Join-Path $_.FullName 'tests' } |
         Where-Object { Test-Path $_ }
+
+    Join-Path $repoRoot 'provider' 'scripts' 'tests' | Where-Object { Test-Path $_ }
 )
 
 if (-not $testDirs) {

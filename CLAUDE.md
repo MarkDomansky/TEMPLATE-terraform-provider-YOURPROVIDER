@@ -9,8 +9,13 @@
   `provider/`, `docs/`, `examples/`, and `tests/e2e/` is fork-owned.
 * Resources are folders of PowerShell scripts + resource.tfps.json under
   `provider/resources/`; the authoring contract is in
-  docs/guides/writing-resources.md. Scripts must not declare `param(...)`,
-  must emit exactly one object, and must keep the error stream clean.
+  docs/guides/writing-resources.md. CRUD scripts (and a data source's
+  `read.ps1`) declare `param([hashtable]$InputData)` — the engine binds it by
+  name and passes nothing else, so no other parameter may be `Mandatory` and
+  `$Action` must never be a parameter. Lifecycle scripts
+  (`provider/scripts/startup.ps1`, `shutdown.ps1`) must have no param block at
+  all. Every script must emit exactly one object and keep the error stream
+  clean.
 * Keep unit tests cross-platform (Windows/Linux/macOS, PowerShell 7).
 
 ## Commit messages decide the released version

@@ -4,5 +4,9 @@
 # after the practitioner's shutdown_script. Disconnect/clean up here, e.g.:
 #
 #   Disconnect-ExchangeOnline -Confirm:$false
+#
+# Like startup.ps1, this runs flat at the runspace scope: do NOT declare a
+# param block (the engine prepends its own), and read $global:ProviderData or
+# your own globals instead.
 
 $global:YourProviderState = $null

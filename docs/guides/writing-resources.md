@@ -97,7 +97,8 @@ PowerShell Direct support for free).
   typed (numbers, bools, arrays, hashtables; `json` attributes arrive
   decoded). On read/update/delete it also carries `id`.
 - `$Action` — the current action name (`create`, `read`, ...).
-- **Do not write your own `param(...)` block** — the engine injects one.
+- **Declare the `param(...)` block** (see below); the engine injects one only
+  when your script has none.
 - **Emit exactly one object** to the success stream (a hashtable is
   idiomatic). Pipe unwanted cmdlet output to `Out-Null`; a second emitted
   object fails the operation.
@@ -115,6 +116,55 @@ PowerShell Direct support for free).
   `provider/scripts/startup.ps1` typically authenticates and stashes state in
   your own `$global:...` variable; `shutdown.ps1` cleans up.
 
+### The param block
+
+Write the contract down. Every script in `provider/` opens with a param block
+that names what the engine hands it, so the signature — not a comment — is what
+tells you whether `id` is available:
+
+```powershell
+[CmdletBinding()]
+param(
+    # The config attributes from state, plus 'id' - the value create.ps1
+    # emitted, or the argument to `terraform import`.
+    [Parameter(Mandatory)]
+    [ValidateNotNull()]
+    [ValidateScript({ -not [string]::IsNullOrWhiteSpace([string]$_['id']) },
+        ErrorMessage = 'read.ps1 requires a non-empty $InputData.id; the engine injects it from state.')]
+    [hashtable]$InputData
+)
+```
+
+Rules the engine imposes:
+
+- The engine binds **`-InputData` by name and passes nothing else**. Declaration
+  order does not matter, but any *other* parameter you declare must be optional
+  and will keep its default — marking one `Mandatory` fails the operation with
+  an opaque `ParameterBindingException`.
+- **Never declare `$Action` as a parameter.** The engine assigns it in the
+  enclosing scope; a parameter of that name shadows it with `$null`. Read the
+  variable instead.
+- `$InputData` is always a non-null `[hashtable]` (empty at worst), so
+  `[Parameter(Mandatory)]` on it is safe.
+- Omitting the param block entirely still works — the engine injects
+  `param([hashtable]$InputData)` — but you lose the documentation and the
+  validation, and the fork's unit-test harness has to guess.
+- **`provider/scripts/startup.ps1` and `shutdown.ps1` must NOT have one.**
+  Lifecycle scripts run flat at the runspace scope (that is what lets them
+  create globals that outlive the call) and the engine prepends its own param
+  block, so a second one is a parse error. They read `$global:ProviderData`.
+
+Validate only what the manifest cannot already guarantee. Required attributes,
+types, and `one_of` validators are enforced by Terraform from the manifest
+before the script ever runs; re-checking them in the param block is noise. The
+engine-injected `id` is the thing no manifest describes, so `read.ps1`,
+`update.ps1`, and `delete.ps1` assert on it — and get a named, actionable error
+instead of a downstream `Test-Path` failure on an empty string.
+
+A declared param block also makes the `.ps1` directly invocable —
+`& ./read.ps1 -InputData @{ id = 'x' }` — with no engine, no sidecar, and no
+harness.
+
 ### Update vs. replace, precisely
 
 1. Attribute marked `requires_replace` changed → **replace** (always).
@@ -127,8 +177,11 @@ PowerShell Direct support for free).
 ## Testing
 
 - **Unit** (`provider/**/tests/*.Tests.ps1`): the ScriptUnit harness runs one
-  script in-process with a fake `$InputData` and enforces the contract; Pester
-  `Mock` works on any cmdlet the script calls, so no live system is needed.
+  script in-process with a fake `$InputData` and enforces the contract — it
+  binds `-InputData` by name exactly as the engine does, and rejects param
+  blocks the engine could not satisfy (a declared `$Action`, or a second
+  `Mandatory` parameter). Pester `Mock` works on any cmdlet the script calls,
+  so no live system is needed.
   Run all: `pwsh ./.template/tests/unit/Invoke-UnitTests.ps1`.
 - **E2E** (`tests/e2e/*.Tests.ps1`): real `terraform apply` against your
   compiled provider via dev_overrides (TFHarness). Gate suites that need live

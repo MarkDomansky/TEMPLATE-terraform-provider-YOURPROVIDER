@@ -29,6 +29,23 @@ Describe 'example_file resource scripts' {
         $manifest.attributes.size.computed | Should -BeTrue
     }
 
+    It '<_>.ps1 declares the engine param contract' -ForEach @('create', 'read', 'update', 'delete') {
+        $path = Get-ResourceScriptPath -Kind resources -Name example_file -Action $_
+        $params = @(Get-ScriptParameter -Script (Get-Content -LiteralPath $path -Raw))
+
+        # The engine binds -InputData by name and passes nothing else.
+        $params.Name | Should -Contain 'InputData'
+        # $Action arrives as an enclosing-scope variable; a parameter shadows it.
+        $params.Name | Should -Not -Contain 'Action'
+        # Nothing can supply a second mandatory parameter.
+        @($params | Where-Object { $_.Mandatory -and $_.Name -ne 'InputData' }) | Should -BeNullOrEmpty
+    }
+
+    It '<_>.ps1 rejects an $InputData with no id' -ForEach @('read', 'update', 'delete') {
+        { Invoke-ResourceScript -Kind resources -Name example_file -Action $_ -InputData @{ path = 'no-id.txt' } } |
+            Should -Throw -ExpectedMessage '*requires a non-empty $InputData.id*'
+    }
+
     It 'create writes the file and emits id, size, last_modified' {
         $result = Invoke-ResourceScript -Kind resources -Name example_file -Action create -InputData @{
             path    = 'unit-create.txt'
