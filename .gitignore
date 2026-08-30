@@ -607,6 +607,11 @@ nunit-*.xml
 ##################################################
 # Template-provider specific ignores
 ##################################################
+# The Visual Studio boilerplate [Rr]elease/ rule above (build output) would
+# swallow the managed release configs - re-include them.
+!.template/release/
+!.template/release/**
+
 # Local build output and staged sidecars
 dist/
 dist-pshost/
