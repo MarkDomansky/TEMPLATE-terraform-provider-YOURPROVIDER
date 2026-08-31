@@ -158,6 +158,11 @@ jobs:
             dist/*.zip
             dist/*_SHA256SUMS
             dist/*_SHA256SUMS.sig
+          # Consumed by `smoke` and `publish` in this same run; the week is a
+          # debug window - re-running `publish` or pulling the exact zips the
+          # smoke test verified after a bad release. The published release
+          # keeps them permanently, so nothing is lost when this expires.
+          # Capped by the repo's Actions retention setting (see SETUP.md).
           retention-days: 7
 
   # Prove each zip is installable and serves the typed schemas: a real
