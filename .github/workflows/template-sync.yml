@@ -18,11 +18,13 @@
 # - Repo Settings -> Actions -> General -> "Allow GitHub Actions to create
 #   and approve pull requests" must be enabled.
 # - The default GITHUB_TOKEN cannot push workflow-file changes, and PRs it
-#   creates do not trigger CI. Add a TEMPLATE_SYNC_TOKEN secret (PAT with
-#   contents + workflows + pull-requests write on this repo) to sync
-#   .github/workflows/** and get CI runs on sync PRs. Without it, workflow
-#   drift is only reported in the PR body for you to apply by hand, and
-#   sync PRs show no checks - close and reopen the PR (a user-identity
+#   creates do not trigger CI. Add a TFPS_TEMPLATE_SYNC_TOKEN secret (PAT with
+#   contents + workflows + pull-requests + issues write on this repo) to sync
+#   .github/workflows/** and get CI runs on sync PRs. See the template wiki's
+#   "Guides Template Sync" page for how to mint and scope it. Without it,
+#   workflow drift is still DETECTED and reported - as a run warning plus a
+#   note in the PR or tracking issue - but you must copy those files by hand,
+#   and sync PRs show no checks: close and reopen the PR (a user-identity
 #   event) to trigger CI on it.
 # - Merge sync PRs with a squash into `beta`, like any other PR.
 #
@@ -58,7 +60,7 @@ jobs:
         with:
           path: copy
           fetch-depth: 0
-          token: ${{ secrets.TEMPLATE_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.TFPS_TEMPLATE_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Checkout template
         uses: actions/checkout@v4
@@ -74,8 +76,8 @@ jobs:
         shell: pwsh
         working-directory: copy
         env:
-          GH_TOKEN: ${{ secrets.TEMPLATE_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
-          HAS_PAT: ${{ secrets.TEMPLATE_SYNC_TOKEN != '' }}
+          GH_TOKEN: ${{ secrets.TFPS_TEMPLATE_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          HAS_PAT: ${{ secrets.TFPS_TEMPLATE_SYNC_TOKEN != '' }}
           MODE: ${{ github.event_name }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -151,6 +153,43 @@ jobs:
 
           $changed = (git diff --cached --name-status | Out-String).Trim()
 
+          # Changes this run CANNOT apply. Workflow files are the only such
+          # class, and only ever for want of a token: DETECTING them needs
+          # nothing special, but PUSHING .github/workflows/** is forbidden to
+          # the default GITHUB_TOKEN, so without the PAT they must be copied by
+          # hand. Check mode staged them (they appear in $changed); the manual
+          # sync did not, and reads the list off the script's workflow-drift
+          # line instead. Either way the drift is never silently dropped.
+          $blocked = ''
+          if ($env:HAS_PAT -ne 'true') {
+            if ($checkOnly) {
+              $wf = @($changed -split "`r?`n" |
+                Where-Object { $_ -match '\.github/workflows/' } |
+                ForEach-Object { ($_ -split "`t")[-1] })
+              if ($wf) { $blocked = ($wf -join ', ') }
+            }
+            elseif ($out -match 'workflow-drift: (.+)') {
+              $blocked = $Matches[1].Trim()
+            }
+          }
+          $blockedNote = ''
+          if ($blocked) {
+            Write-Host "::warning::Workflow changes CANNOT be synced automatically without a TFPS_TEMPLATE_SYNC_TOKEN secret: $blocked - copy these files from the template by hand."
+            $blockedNote = @"
+
+          > [!WARNING]
+          > **Cannot be synced automatically: ``$blocked``**
+          >
+          > The default ``GITHUB_TOKEN`` is not allowed to push ``.github/workflows/**``,
+          > so these files are left untouched - the drift is real and still there after
+          > this run. Copy them from ``${{ env.TEMPLATE_REPO }}`` by hand, or add a
+          > ``TFPS_TEMPLATE_SYNC_TOKEN`` secret (PAT with contents + workflows +
+          > pull-requests + issues write) so future syncs include them. See the template
+          > wiki, *Guides Template Sync*, for how to mint and scope that token.
+
+          "@
+          }
+
           $issueTitle = 'Template updates available'
           $existingIssue = gh issue list --state open --search "`"$issueTitle`" in:title" `
               --json number,title --jq ".[] | select(.title == `"$issueTitle`") | .number" | Select-Object -First 1
@@ -170,7 +209,7 @@ jobs:
           The monthly check found template updates that this repo does not have
           (``${{ env.TEMPLATE_REPO }}`` @ ``$templateSha``). No changes have been made -
           run the sync manually to get them as a reviewable PR.
-
+          $blockedNote
           #### How to apply
           Run the **Template Sync** workflow manually - it force-pushes a ``template-sync``
           branch and opens (or refreshes) a PR into ``$target``:
@@ -202,6 +241,29 @@ jobs:
 
           # ------------------------- manual sync ---------------------------
           if (-not $changed) {
+            # Drift that this token cannot push is NOT "already up to date":
+            # closing the PR and the tracking issue here would erase the only
+            # record that the repo is still behind. Keep the issue open (raise
+            # one if there is none) so the warning survives the run.
+            if ($blocked) {
+              $blockedBody = @"
+          The manual sync could not apply anything: the only remaining difference against
+          ``${{ env.TEMPLATE_REPO }}`` @ ``$templateSha`` is in files this run is not allowed
+          to push.
+          $blockedNote
+          #### Template commits since the last sync
+          $history
+          "@
+              if ($existingIssue) {
+                gh issue edit $existingIssue --body $blockedBody
+                gh issue comment $existingIssue --body "A manual sync ran against ``$templateSha`` and could not apply the workflow changes above. This issue stays open until they are applied."
+                Write-Host "::notice::Updated tracking issue #$existingIssue - workflow drift remains."
+              }
+              else {
+                gh issue create --title $issueTitle --body $blockedBody
+              }
+              return
+            }
             Write-Host '::notice::Managed files already match the template.'
             if ($existingPr) {
               gh pr close $existingPr --comment 'Superseded: the managed files now match the template.' --delete-branch
@@ -215,19 +277,15 @@ jobs:
           git commit -q -m "chore: sync managed files from template @$templateSha"
           git push -f origin template-sync
 
-          $wfNote = ''
-          if ($out -match 'workflow-drift: (.+)') {
-            $wfNote = "`n> [!WARNING]`n> Workflow files changed in the template but cannot be pushed with the default token: **$($Matches[1].Trim())**. Copy them from the template by hand, or add a ``TEMPLATE_SYNC_TOKEN`` secret (PAT with contents + workflows + pull-requests write) so future syncs include them.`n"
-          }
           $ciNote = ''
           if ($env:HAS_PAT -ne 'true') {
-            $ciNote = "`n> [!NOTE]`n> No CI checks run on this PR automatically (GitHub ignores events created with the default ``GITHUB_TOKEN``). **Close and reopen this PR** to trigger them - required status checks stay pending until you do. Merging always triggers CI on ``$target`` normally. A ``TEMPLATE_SYNC_TOKEN`` secret makes future sync PRs trigger CI on their own.`n"
+            $ciNote = "`n> [!NOTE]`n> No CI checks run on this PR automatically (GitHub ignores events created with the default ``GITHUB_TOKEN``). **Close and reopen this PR** to trigger them - required status checks stay pending until you do. Merging always triggers CI on ``$target`` normally. A ``TFPS_TEMPLATE_SYNC_TOKEN`` secret makes future sync PRs trigger CI on their own.`n"
           }
           $title = "chore: sync managed files from template @$templateSha"
           $body = @"
           Sync of the managed file set from
           ``${{ env.TEMPLATE_REPO }}`` @ ``$templateSha`` (ref ``${{ inputs.source_ref || 'main' }}``).
-          $wfNote$ciNote
+          $blockedNote$ciNote
           #### Template commits since the last sync
           $history
 

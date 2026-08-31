@@ -59,7 +59,7 @@ carrying a `MANAGED FILE` header.
 | Path | Owner | Notes |
 |---|---|---|
 | `provider/**` | **You** | Identity, schemas, scripts, unit tests. The sample `example_file` folders get deleted before you publish. |
-| `docs/**` | **You** | Terraform Registry docs; synced to the repo wiki from `main`. Exception: `docs/guides/writing-resources.md` is managed — the registry publishes it from here. |
+| `docs/**` | **You** | Terraform Registry docs; synced to the repo wiki from `main`. Exception: `docs/guides/writing-resources.md` is managed — the registry publishes it from here. `docs/guides/template-sync.md` ships with a new copy but is *not* managed: keep it or delete it, syncs never restore it. |
 | `examples/**` | **You** | Sample .tf configs. |
 | `tests/e2e/**` | **You** | E2E Pester suites (sample included). |
 | `.template/**` | Managed | Build scripts, test harnesses, release configs, wiki-sync script. |
@@ -73,6 +73,12 @@ issue when the template has updates, and a manually triggered sync workflow
 copies the managed file set over and opens a PR with whatever changed (no
 shared git history needed, so "Use this template" copies sync too). Don't
 edit managed files; if one blocks you, open an issue on the template instead.
+
+Workflow files are the one thing a sync cannot push on its own — GitHub
+forbids that to the default token. It still *detects* the drift and warns
+about it on the run, in the PR, and in the tracking issue; a
+`TFPS_TEMPLATE_SYNC_TOKEN` secret makes it apply them instead. See
+[docs/guides/template-sync.md](docs/guides/template-sync.md).
 
 ## Engine updates
 

@@ -21,7 +21,7 @@ param(
     # Also mirror .github/workflows/**. Requires the caller to push with a
     # token that has the workflow scope - the default GITHUB_TOKEN cannot
     # push workflow-file changes, so the workflow only passes this when a
-    # TEMPLATE_SYNC_TOKEN secret is configured.
+    # TFPS_TEMPLATE_SYNC_TOKEN secret is configured.
     [switch]$IncludeWorkflows
 )
 
@@ -81,16 +81,22 @@ foreach ($f in $managedRootFiles) {
     if ($LASTEXITCODE -ne 0) { throw "staging $f failed" }
 }
 
-# Report workflow drift the caller could not sync (no PAT), so the PR body
-# can tell the user to update those files by hand.
+# Report workflow drift the caller could not sync (no PAT), so it can warn and
+# tell the user to update those files by hand. Detection needs no token - only
+# PUSHING workflow files does - so this list is always complete, including the
+# files a sync would DELETE.
 if (-not $IncludeWorkflows) {
+    $templateWorkflows = @(Get-ChildItem (Join-Path $TemplateRoot '.github/workflows') -File)
+    $templateNames = @($templateWorkflows | ForEach-Object Name)
     $drift = @(
-        Get-ChildItem (Join-Path $TemplateRoot '.github/workflows') -File | ForEach-Object {
-            $local = Join-Path '.github/workflows' $_.Name
-            if (-not (Test-Path -LiteralPath $local) -or
-                (Get-FileHash -LiteralPath $local).Hash -ne (Get-FileHash -LiteralPath $_.FullName).Hash) {
-                $_.Name
-            }
+        foreach ($f in $templateWorkflows) {
+            $local = Join-Path '.github/workflows' $f.Name
+            if (-not (Test-Path -LiteralPath $local)) { "$($f.Name) (added)" }
+            elseif ((Get-FileHash -LiteralPath $local).Hash -ne (Get-FileHash -LiteralPath $f.FullName).Hash) { "$($f.Name) (changed)" }
+        }
+        foreach ($local in @(git ls-files -- '.github/workflows')) {
+            $name = Split-Path -Leaf $local
+            if ($templateNames -notcontains $name) { "$name (removed in template)" }
         }
     )
     if ($drift) {

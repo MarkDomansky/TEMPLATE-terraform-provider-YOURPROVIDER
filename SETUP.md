@@ -156,10 +156,15 @@ manifest); future releases appear automatically.
   sync PR is force-pushed and updated by the next manual run, never
   duplicated. Squash-merge it like any other PR. Two one-time settings:
   enable "Allow GitHub Actions to create and approve pull requests"
-  (Settings → Actions → General), and optionally add a `TEMPLATE_SYNC_TOKEN`
-  secret (PAT with contents + workflows + pull-requests write) so syncs can
-  update `.github/workflows/**` and trigger CI on the PR — without it,
-  workflow changes are only reported in the PR body. Sync PRs created
+  (Settings → Actions → General), and optionally add a
+  `TFPS_TEMPLATE_SYNC_TOKEN` secret (fine-grained PAT with contents +
+  workflows + pull-requests + issues write, scoped to just the repos made
+  from this template — see `docs/guides/template-sync.md`) so syncs can
+  update `.github/workflows/**` and trigger CI on the PR. Without it,
+  workflow drift is still detected and reported — as a warning on the run
+  and in the PR body, and the tracking issue is left open when workflow
+  files are the only thing out of date — but you apply those files by
+  hand. Sync PRs created
   without the PAT show **no CI checks** (GitHub ignores events from the
   default token): close and reopen the PR to trigger them — required status
   checks stay pending until you do. Merging the PR always triggers CI on
