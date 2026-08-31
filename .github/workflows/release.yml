@@ -117,6 +117,14 @@ jobs:
       # Sign checksums only when the GPG secrets are configured; a GitHub-only
       # release does not require signatures (the Terraform Registry DOES - see
       # SETUP.md), so their absence must not block CI.
+      #
+      # `validate` is always skipped: Update-Engine.ps1 above resolves the
+      # engine version INTO go.mod (and writes go.sum, which this repo does not
+      # track) on every run, so the tree is deliberately dirty by the time
+      # GoReleaser starts and its git-state check would abort with "git is in a
+      # dirty state". Skipping validate also drops its tag check, which this
+      # pipeline does not want either - the real tag is only created after the
+      # smoke test, and the version comes from GORELEASER_CURRENT_TAG below.
       - name: Check for GPG signing key
         id: gpg_check
         env:
@@ -124,10 +132,10 @@ jobs:
         run: |
           if [ -n "$GPG_PRIVATE_KEY" ]; then
             echo "have_key=true" >> "$GITHUB_OUTPUT"
-            echo "skips=publish,announce" >> "$GITHUB_OUTPUT"
+            echo "skips=publish,announce,validate" >> "$GITHUB_OUTPUT"
           else
             echo "have_key=false" >> "$GITHUB_OUTPUT"
-            echo "skips=publish,announce,sign" >> "$GITHUB_OUTPUT"
+            echo "skips=publish,announce,validate,sign" >> "$GITHUB_OUTPUT"
             echo "::notice::GPG_PRIVATE_KEY secret not set - checksums will not be signed."
           fi
       - name: Import GPG key
